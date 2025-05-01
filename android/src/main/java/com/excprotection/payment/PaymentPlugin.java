@@ -1,63 +1,82 @@
 package com.excprotection.payment;
 
-import com.oppwa.mobile.connect.payment.PaymentParams;
-import com.oppwa.mobile.connect.payment.card.CardPaymentParams;
-import com.oppwa.mobile.connect.payment.stcpay.STCPayPaymentParams;
-import com.oppwa.mobile.connect.payment.stcpay.STCPayVerificationOption;
-import com.oppwa.mobile.connect.provider.ITransactionListener;
-import com.oppwa.mobile.connect.provider.OppPaymentProvider;
-import androidx.annotation.NonNull;
-import io.flutter.embedding.engine.plugins.FlutterPlugin;
-import io.flutter.embedding.engine.plugins.activity.ActivityAware;
-import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding;
-import io.flutter.plugin.common.MethodCall;
-import io.flutter.plugin.common.MethodChannel;
-import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
-import io.flutter.plugin.common.MethodChannel.Result;
-import io.flutter.plugin.common.PluginRegistry;
 import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.ServiceConnection;
+import android.net.Uri;
+import android.os.Handler;
+import android.os.IBinder;
+import android.os.Looper;
+import android.util.Log;
+import android.widget.Toast;
+
+import java.util.LinkedHashSet;
+import java.util.Set;
+
+import io.flutter.embedding.android.FlutterActivity;
 import com.oppwa.mobile.connect.checkout.dialog.CheckoutActivity;
+import com.oppwa.mobile.connect.checkout.dialog.IPaymentFormListener;
+import com.oppwa.mobile.connect.checkout.dialog.PaymentButtonFragment;
+import com.oppwa.mobile.connect.checkout.meta.CheckoutActivityResult;
+import com.oppwa.mobile.connect.checkout.meta.CheckoutActivityResultContract;
 import com.oppwa.mobile.connect.checkout.meta.CheckoutSettings;
+import com.oppwa.mobile.connect.checkout.meta.CheckoutSkipCVVMode;
 import com.oppwa.mobile.connect.checkout.meta.CheckoutStorePaymentDetailsMode;
 import com.oppwa.mobile.connect.exception.PaymentError;
 import com.oppwa.mobile.connect.exception.PaymentException;
 import com.oppwa.mobile.connect.payment.BrandsValidation;
 import com.oppwa.mobile.connect.payment.CheckoutInfo;
 import com.oppwa.mobile.connect.payment.ImagesRequest;
+import com.oppwa.mobile.connect.payment.PaymentParams;
+import com.oppwa.mobile.connect.payment.card.CardPaymentParams;
 import com.oppwa.mobile.connect.payment.token.TokenPaymentParams;
 import com.oppwa.mobile.connect.provider.Connect;
-//import com.oppwa.mobile.connect.provider.ITransactionListener;
+import com.oppwa.mobile.connect.provider.ITransactionListener;
+import com.oppwa.mobile.connect.provider.OppPaymentProvider;
+import com.oppwa.mobile.connect.provider.ThreeDSWorkflowListener;
 import com.oppwa.mobile.connect.provider.Transaction;
 import com.oppwa.mobile.connect.provider.TransactionType;
+
+
+import android.content.ComponentName;
+import android.content.ServiceConnection;
 import android.net.Uri;
 import android.os.Handler;
+import android.os.IBinder;
 import android.os.Looper;
+import android.util.Log;
 import android.widget.Toast;
+
+import io.flutter.embedding.android.FlutterActivity;
+
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
-public class PaymentPlugin  implements
-        PluginRegistry.ActivityResultListener ,ActivityAware
-        , FlutterPlugin, MethodCallHandler , PluginRegistry.NewIntentListener, ITransactionListener {
+import io.flutter.embedding.android.FlutterFragmentActivity;
+import io.flutter.embedding.engine.FlutterEngine;
+import io.flutter.plugin.common.MethodCall;
+import io.flutter.plugin.common.MethodChannel;
 
+public class PaymentPlugin extends FlutterFragmentActivity implements ITransactionListener,MethodChannel.Result {
+
+  private String  CHANNEL = "Hyperpay.demo.fultter/channel";
+  private String  CustomCHANNEL = "Hyperpay.demo.custom.fultter/channel";
+  private String checkoutid = "";
   private  MethodChannel.Result Result;
+  private String type = "";
+  private String number,holder,cvv,year,month,brand;
   private  String mode = "";
-  private List<String> brandsReadyUi ;
-  private String brands = "" ;
-  private String Lang = "";
-  private String EnabledTokenization = "";
-  private String ShopperResultUrl = "";
-  private String setStorePaymentDetailsMode = "";
-  private String number, holder, cvv, year, month;
-  private String TokenID = "";
-  private OppPaymentProvider paymentProvider  = null ;
-  private Activity activity;
-  private Context context;
-
+  private String STCPAY = "";
+  OppPaymentProvider paymentProvider = new OppPaymentProvider(MainActivity.this, Connect.ProviderMode.TEST);
+  CheckoutSettings checkoutSettings;
 
   private final Handler handler = new Handler(Looper.getMainLooper());
 
@@ -65,389 +84,455 @@ public class PaymentPlugin  implements
   /// This local reference serves to register the plugin with the Flutter Engine and unregister it
   /// when the Flutter Engine is detached from the Activity
 
-  private MethodChannel channel;
-  String CHANNEL = "Hyperpay.demo.fultter/channel";
 
-  @Override
-  public void onAttachedToEngine(@NonNull FlutterPluginBinding flutterPluginBinding) {
-    channel = new MethodChannel(flutterPluginBinding.getBinaryMessenger(), CHANNEL);
-    channel.setMethodCallHandler(this);
-    context = flutterPluginBinding.getApplicationContext();
 
-  }
-
-  @Override
-  public void onMethodCall(@NonNull MethodCall call, @NonNull Result result) {
-
-    Result = result;
-    if (call.method.equals("gethyperpayresponse")) {
-
-      String checkoutId = call.argument("checkoutid");
-      String type = call.argument("type");
-      mode = call.argument("mode");
-      Lang = call.argument("lang");
-      ShopperResultUrl = call.argument("ShopperResultUrl");
-
-      switch (type != null ? type : "NullType") {
-        case "ReadyUI" :
-          brandsReadyUi = call.argument("brand");
-          setStorePaymentDetailsMode = call.argument("setStorePaymentDetailsMode");
-          openCheckoutUI(checkoutId) ;
-        break;
-        case "StoredCards" :
-          cvv = call.argument("cvv");
-          TokenID = call.argument("TokenID");
-          storedCardPayment(checkoutId);
-          break;
-
-        case "CustomUI" :
-          brands = call.argument("brand");
-          number = call.argument("card_number");
-          holder = call.argument("holder_name");
-          year = call.argument("year");
-          month = call.argument("month");
-          cvv = call.argument("cvv");
-          EnabledTokenization = call.argument("EnabledTokenization");
-          openCustomUI(checkoutId);
-          break;
-
-        case "CustomUISTC":
-          number = call.argument("phone_number");
-          openCustomUISTC(checkoutId);
-          break;
-
-        default : error("1", "THIS TYPE NO IMPLEMENT" + type, "");
+  boolean check(String ccNumber) {
+    int sum = 0;
+    boolean alternate = false;
+    for (int i = ccNumber.length() - 1; i >= 0; i--)
+    {
+      int n = Integer.parseInt(ccNumber.substring(i, i + 1));
+      if (alternate)
+      {
+        n *= 2;
+        if (n > 9)
+        {
+          n = (n % 10) + 1;
+        }
       }
-
-    } else {
-      notImplemented();
+      sum += n;
+      alternate = !alternate;
     }
+    return (sum % 10 == 0);
 
   }
+
+
+
+  @Override
+  public void success(final Object result) {
+    handler.post(
+            new Runnable() {
+              @Override
+              public void run() {
+                Result.success(result);
+
+              }
+            });
+  }
+
+  @Override
+  public void error(
+          final String errorCode, final String errorMessage, final Object errorDetails) {
+    handler.post(
+            new Runnable() {
+              @Override
+              public void run() {
+                Result.error(errorCode, errorMessage, errorDetails);
+              }
+            });
+  }
+
+  @Override
+  public void notImplemented() {
+    handler.post(
+            new Runnable() {
+              @Override
+              public void run() {
+                Result.notImplemented();
+              }
+            });
+  }
+
+  Transaction transaction = null;
+
+  String MadaRegex = "";
+
+  String ptMadaVExp = "";
+  String ptMadaMExp = "";
+  String brands = "";
+
+  String istoken = "";
+  String token = "";
+  @Override
+  public void configureFlutterEngine(@NonNull FlutterEngine flutterEngine) {
+    super.configureFlutterEngine(flutterEngine);
+
+    new MethodChannel(flutterEngine.getDartExecutor().getBinaryMessenger(), CHANNEL).setMethodCallHandler(
+            new MethodChannel.MethodCallHandler() {
+              @Override
+              public void onMethodCall(MethodCall call, MethodChannel.Result result) {
+
+                Result = result;
+                if (call.method.equals("gethyperpayresponse")) {
+
+                  type = call.argument("type");
+                  mode = call.argument("mode");
+                  checkoutid = call.argument("checkoutid");
+
+
+                  if (type.equals("ReadyUI")){
+
+
+                    openCheckoutUI(checkoutid);
+
+                  } else {
+
+                    brands = call.argument("brand");
+                    STCPAY = call.argument("STCPAY");
+                    number = call.argument("card_number");
+                    holder = call.argument("holder_name");
+                    year = call.argument("year");
+                    month = call.argument("month");
+                    cvv = call.argument("cvv");
+                    ptMadaVExp = call.argument("MadaRegexV");
+                    ptMadaMExp = call.argument("MadaRegexM");
+                    istoken = call.argument("istoken");
+                    token = call.argument("token");
+
+                    openCustomUI(checkoutid);
+
+
+                  }
+
+                } else {
+
+                  error("1","Method name is not found","");
+                }
+              }});
+
+
+    // new MethodChannel(flutterEngine.getDartExecutor().getBinaryMessenger(), CHANNEL).setMethodCallHandler(hand);
+  }
+
+
 
   private void openCheckoutUI(String checkoutId) {
 
-    Set<String> paymentBrands = new LinkedHashSet<>(brandsReadyUi);
-    // CHECK PAYMENT MODE
-    CheckoutSettings checkoutSettings;
-    if (mode.equals("live")) {
-      //LIVE MODE
-      checkoutSettings = new CheckoutSettings(checkoutId, paymentBrands,
-              Connect.ProviderMode.LIVE);
+
+    Set<String> paymentBrands = new LinkedHashSet<String>();
+
+    if (brands.equals("mada")) {
+
+      paymentBrands.add("MADA");
+
     } else {
-      // TEST MODE
-      checkoutSettings = new CheckoutSettings(checkoutId, paymentBrands,
-              Connect.ProviderMode.TEST);
+
+      paymentBrands.add("VISA");
+      paymentBrands.add("MASTER");
+
     }
 
-    // SET LANG
-    checkoutSettings.setLocale(Lang);
 
-    checkoutSettings.setPaymentFormListener(new CustomFormListener());
 
-    // SHOW TOTAL PAYMENT AMOUNT IN BUTTON
-    // checkoutSettings.setTotalAmountRequired(true);
+    checkoutSettings =  new CheckoutSettings(checkoutId,paymentBrands,
+            Connect.ProviderMode.TEST);
 
-    //SET SHOPPER
-    //checkoutSettings.setShopperResultUrl(ShopperResultUrl + "://result");
-
-    //SAVE PAYMENT CARDS FOR NEXT
-    if (setStorePaymentDetailsMode.equals("true")) {
-      checkoutSettings.setStorePaymentDetailsMode(CheckoutStorePaymentDetailsMode.PROMPT);
+    if (mode.equals("LIVE")) {
+      checkoutSettings =  new CheckoutSettings(checkoutId,paymentBrands,
+              Connect.ProviderMode.LIVE);
     }
-    //CHANGE THEME
-    checkoutSettings.setThemeResId(R.style.NewCheckoutTheme);
 
-    // CHECKOUT BROADCAST RECEIVER
-    ComponentName componentName = new ComponentName(
-            context.getPackageName(), CheckoutBroadcastReceiver.class.getName());
 
-    // SET UP THE INTENT AND START THE CHECKOUT ACTIVITY
+    //  ComponentName componentName = new ComponentName(
+    //   getPackageName(), CheckoutBroadcastReceiver.class.getName());
 
-    Intent intent = new Intent(context.getApplicationContext(), CheckoutActivity.class);
-    intent.putExtra(CheckoutActivity.CHECKOUT_SETTINGS, checkoutSettings);
-    intent.putExtra(CheckoutActivity.CHECKOUT_RECEIVER, componentName);
+    startCheckout();
 
-    // START ACTIVITY
-    activity.startActivityForResult(intent, 242);
+
+    /* Set up the Intent and start the checkout activity. */
+    //  Intent intent = checkoutSettings.createCheckoutActivityIntent(this, componentName);
+
+    //  startActivityForResult(intent, CheckoutActivity.REQUEST_CODE_CHECKOUT);
+
 
   }
 
-  private void storedCardPayment(String checkoutId) {
 
-    try {
+  private final ActivityResultLauncher checkoutLauncher = registerForActivityResult(
+          new CheckoutActivityResultContract(),
+          this::handleCheckoutResult
+  );
 
-      TokenPaymentParams paymentParams = new TokenPaymentParams(checkoutId, TokenID, brands, cvv);
+  private void startCheckout() {
+    checkoutLauncher.launch(checkoutSettings);
+  }
 
-      paymentParams.setShopperResultUrl(ShopperResultUrl + "://result");
+  private void handleCheckoutResult(@NonNull CheckoutActivityResult result) {
+    if (result.isCanceled()) {
+      Toast.makeText(getBaseContext(),"canceled",Toast.LENGTH_LONG).show();
 
-      Transaction transaction = new Transaction(paymentParams);
+      error("2","Canceled","");
 
-      //Set Mode;
-      boolean resultMode = mode.equals("test");
-      Connect.ProviderMode providerMode ;
+      return;
+    }
 
-      if (resultMode) {
-        providerMode =  Connect.ProviderMode.TEST ;
+    if (result.isErrored()) {
+      // error occurred during the checkout process
+      PaymentError error = result.getPaymentError();
+
+      Toast.makeText(getBaseContext(),"error",Toast.LENGTH_LONG).show();
+
+      assert error != null;
+      Log.e("errorrr",error.getErrorInfo());
+
+      Log.e("errorrr2",String.valueOf(error.getErrorCode()));
+
+      Log.e("errorrr3",error.getErrorMessage());
+
+      Log.e("errorrr4",String.valueOf(error.describeContents()));
+
+      error("3","Checkout Result Error","");
+
+      return;
+    }
+
+    Transaction transaction = result.getTransaction();
+    String resourcePath = result.getResourcePath();
+
+    if (transaction != null) {
+      if (transaction.getTransactionType() == TransactionType.SYNC) {
+        // request payment status
+        success("SYNC");
+
       } else {
-        providerMode =  Connect.ProviderMode.LIVE ;
+        // wait for the asynchronous transaction callback in the onNewIntent()
       }
+    }
+  }
 
-      paymentProvider = new OppPaymentProvider(activity.getBaseContext(), providerMode);
+  private void openCustomUI(String checkoutid) {
 
-      //Submit Transaction
-      //Listen for transaction Completed - transaction Failed
-    paymentProvider.submitTransaction(transaction, this);
+    Toast.makeText(getBaseContext(),"Waiting..",Toast.LENGTH_LONG).show();
 
-    } catch (PaymentException e) {
-      e.printStackTrace();
+    if (mode.equals("LIVE")) {
 
+      paymentProvider = new OppPaymentProvider(MainActivity.this, Connect.ProviderMode.LIVE);
     }
 
 
-  }
+    if (STCPAY.equals("enabled")) {
 
-  private void openCustomUI(String checkoutId) {
 
-    Toast.makeText(activity.getApplicationContext(), Lang.equals("en_US")
-            ? "Please Waiting.."
-            : "برجاء الانتظار..", Toast.LENGTH_SHORT).show();
+      try {
+        PaymentParams paymentParams = new PaymentParams(checkoutid,"STC_PAY");
+        paymentParams.setShopperResultUrl("com.mosab.demohyperpayapp://result");
+        Transaction transaction = new Transaction(paymentParams);
 
-        if (!CardPaymentParams.isNumberValid(number , true)) {
-          Toast.makeText(activity.getApplicationContext(), Lang.equals("en_US")
-                  ? "Card number is not valid for brand"
-                  : "رقم البطاقة غير صالح",
-                  Toast.LENGTH_SHORT).show();
-        } else if (!CardPaymentParams.isHolderValid(holder)) {
-          Toast.makeText(activity.getApplicationContext(),  Lang.equals("en_US")
-                  ? "Holder name is not valid"
-                  : "اسم المالك غير صالح"
-                  , Toast.LENGTH_SHORT).show();
-        } else if (!CardPaymentParams.isExpiryYearValid(year)) {
-          Toast.makeText(activity.getApplicationContext(),  Lang.equals("en_US")
-                  ? "Expiry year is not valid"
-                  : "سنة انتهاء الصلاحية غير صالحة" ,
-                  Toast.LENGTH_SHORT).show();
-        } else if (!CardPaymentParams.isExpiryMonthValid(month)) {
-          Toast.makeText(activity.getApplicationContext(),  Lang.equals("en_US")
-                  ? "Expiry month is not valid"
-                  : "شهر انتهاء الصلاحية غير صالح"
-                  , Toast.LENGTH_SHORT).show();
-        } else if (!CardPaymentParams.isCvvValid(cvv)) {
-          Toast.makeText(activity.getApplicationContext(),  Lang.equals("en_US")
-                  ? "CVV is not valid"
-                  : "CVV غير صالح"
-                  , Toast.LENGTH_SHORT).show();
-        } else {
-
-          boolean EnabledTokenizationTemp = EnabledTokenization.equals("true");
-          try {
-            PaymentParams paymentParams = new CardPaymentParams(
-                    checkoutId, brands, number, holder, month, year, cvv
-            ).setTokenizationEnabled(EnabledTokenizationTemp);//Set Enabled TokenizationTemp
-
-            paymentParams.setShopperResultUrl(ShopperResultUrl + "://result");
-
-            Transaction transaction = new Transaction(paymentParams);
-
-            //Set Mode;
-            boolean resultMode = mode.equals("test");
-            Connect.ProviderMode providerMode ;
-
-            if (resultMode) {
-              providerMode =  Connect.ProviderMode.TEST ;
-            } else {
-              providerMode =  Connect.ProviderMode.LIVE ;
-            }
-
-            paymentProvider = new OppPaymentProvider(activity.getBaseContext(), providerMode);
-
-            //Submit Transaction
-            //Listen for transaction Completed - transaction Failed
-            paymentProvider.submitTransaction(transaction, this);
-
-          } catch (PaymentException e) {
-            error("0.1", e.getLocalizedMessage(), "");
+        paymentProvider.setThreeDSWorkflowListener(new ThreeDSWorkflowListener() {
+          @Override
+          public Activity onThreeDSChallengeRequired() {
+            return MainActivity.this;
           }
-        }
-  }
-
-  private void openCustomUISTC(String checkoutId) {
-
-    Toast.makeText(activity.getApplicationContext(), Lang.equals("en_US")
-            ? "Please Waiting.."
-            : "برجاء الانتظار..", Toast.LENGTH_SHORT).show();
-    try {
-        //Set Mode
-        boolean resultMode = mode.equals("test");
-        Connect.ProviderMode providerMode ;
-
-        if (resultMode) {
-          providerMode =  Connect.ProviderMode.TEST ;
-        } else {
-          providerMode =  Connect.ProviderMode.LIVE ;
-        }
-
-        STCPayPaymentParams stcPayPaymentParams = new STCPayPaymentParams(checkoutId, STCPayVerificationOption.MOBILE_PHONE);
-
-        stcPayPaymentParams.setMobilePhoneNumber(number);
-
-        stcPayPaymentParams.setShopperResultUrl(ShopperResultUrl + "://result");
-
-        Transaction transaction = new Transaction(stcPayPaymentParams);
-
-        paymentProvider = new OppPaymentProvider(activity.getBaseContext(), providerMode);
-
-        //Submit Transaction
-        //Listen for transaction Completed - transaction Failed
-        paymentProvider.submitTransaction(transaction, this);
-
+        });
+        paymentProvider.submitTransaction(transaction, MainActivity.this);
       } catch (PaymentException e) {
         e.printStackTrace();
       }
 
-  }
 
-  @Override
-  public boolean onActivityResult(int requestCode, int resultCode, Intent data) {
-    switch (resultCode) {
-      case CheckoutActivity.RESULT_OK :
-        /* transaction completed */
-        Transaction transaction = data.getParcelableExtra(CheckoutActivity.CHECKOUT_RESULT_TRANSACTION);
+    } else if (istoken.equals("true")) {
+
+      if (!CardPaymentParams.isCvvValid(cvv)) {
+
+        Toast.makeText(getBaseContext(),"CVV is Invalid",Toast.LENGTH_LONG).show();
+      } else {
+
+        try {
+          TokenPaymentParams paymentParams = new TokenPaymentParams(checkoutid, token, " ",cvv);
+
+          paymentParams.setShopperResultUrl("com.mosab.demohyperpayapp://result");
+
+          Transaction transaction = new Transaction(paymentParams);
+
+          paymentProvider.setThreeDSWorkflowListener(new ThreeDSWorkflowListener() {
+            @Override
+            public Activity onThreeDSChallengeRequired() {
+              return MainActivity.this;
+            }
+          });
 
 
-        /* resource path if needed */
-        // String resourcePath = data.getStringExtra(CheckoutActivity.CHECKOUT_RESULT_RESOURCE_PATH);
-        if (transaction.getTransactionType() == TransactionType.SYNC) {
-          /* check the result of synchronous transaction */
-          success("SYNC");
+          paymentProvider.submitTransaction(transaction, MainActivity.this);
+
+        } catch (PaymentException e) {
+          e.printStackTrace();
         }
 
-      break ;
-      case CheckoutActivity.RESULT_CANCELED :
-              /* shopper canceled the checkout process */
-              error("2", "Canceled", "");
-        break ;
+      }
 
-      case CheckoutActivity.RESULT_ERROR :
-              /* shopper error the checkout process */
-              error("3", "Checkout Result Error", "");
-        break ;
+
+
+    }else {
+
+      boolean result = check(number);
+
+
+      if (!result) {
+
+        Toast.makeText(getBaseContext(),"Card Number is Invalid",Toast.LENGTH_LONG).show();
+
+
+      } else if (!CardPaymentParams.isNumberValid(number,true)) {
+
+        Toast.makeText(getBaseContext(),"Card Number is Invalid",Toast.LENGTH_LONG).show();
+
+      } else if (!CardPaymentParams.isHolderValid(holder) ) {
+
+        Toast.makeText(getBaseContext(),"Card Holder is Invalid",Toast.LENGTH_LONG).show();
+
+      } else if (!CardPaymentParams.isExpiryYearValid(year)) {
+
+        Toast.makeText(getBaseContext(),"Expiry Year is Invalid",Toast.LENGTH_LONG).show();
+
+      } else if (!CardPaymentParams.isExpiryMonthValid(month)) {
+
+        Toast.makeText(getBaseContext(),"Expiry Month is Invalid",Toast.LENGTH_LONG).show();
+
+      } else if (!CardPaymentParams.isCvvValid(cvv)) {
+
+        Toast.makeText(getBaseContext(),"CVV is Invalid",Toast.LENGTH_LONG).show();
+      } else {
+
+        String firstnumber = String.valueOf(number.charAt(0));
+
+        // To add MADA
+
+        if (brands.equals("mada")) {
+          String bin = number.substring(0,6);
+
+          if (bin.matches(ptMadaVExp) || bin.matches(ptMadaMExp)) {
+
+            brand = "MADA";
+
+          } else {
+
+            Toast.makeText(MainActivity.this,"This card is not Mada card",Toast.LENGTH_LONG).show();
+          }
+        } else {
+
+          if (firstnumber.equals("4")) {
+
+            brand = "VISA";
+
+
+          } else if (firstnumber.equals("5")) {
+
+            brand = "MASTER";
+          }
+
+        }
+
+
+        try {
+          PaymentParams paymentParams = new CardPaymentParams(
+                  checkoutid,
+                  brand,
+                  number,
+                  holder,
+                  month,
+                  year,
+                  cvv
+          );
+          paymentParams.setShopperResultUrl("com.mosab.demohyperpayapp://result");
+
+          Transaction transaction = new Transaction(paymentParams);
+
+          paymentProvider.setThreeDSWorkflowListener(new ThreeDSWorkflowListener() {
+            @Override
+            public Activity onThreeDSChallengeRequired() {
+              return MainActivity.this;
+            }
+          });
+
+
+          paymentProvider.submitTransaction(transaction, MainActivity.this);
+
+        } catch (PaymentException e) {
+          e.printStackTrace();
+        }
+
+
+      }
+
+
 
     }
 
-    return  true ;
-  }
 
-  public void success(final Object result) {
-    handler.post(
-            () -> Result.success(result));
-  }
-
-  public void error(
-          @NonNull final String errorCode, final String errorMessage, final Object errorDetails) {
-    handler.post(
-            () -> Result.error(errorCode, errorMessage, errorDetails));
-  }
-
-  public void notImplemented() {
-    handler.post(
-            () -> Result.notImplemented());
-  }
-
-  @Override
-  public boolean onNewIntent(@NonNull Intent intent) {
-    // TO BACK TO VIEW
-    if (intent.getScheme() != null && intent.getScheme().equals(ShopperResultUrl)) {
-      success("success");
-    }
-    return  true ;
-  }
-
-
-  @Override
-  public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {
-    channel.setMethodCallHandler(null);
-  }
-
-  @Override
-  public void onAttachedToActivity(@NonNull ActivityPluginBinding binding) {
-    activity = binding.getActivity();
-    binding.addActivityResultListener(this);
-    binding.addOnNewIntentListener(this); // TO LISTEN ON NEW INTENT OPEN
 
   }
 
   @Override
-  public void onDetachedFromActivityForConfigChanges() {
+  public void brandsValidationRequestSucceeded(BrandsValidation brandsValidation) {
 
   }
 
   @Override
-  public void onReattachedToActivityForConfigChanges(@NonNull ActivityPluginBinding binding) {
+  public void brandsValidationRequestFailed(PaymentError paymentError) {
 
   }
 
   @Override
-  public void onDetachedFromActivity() {
+  public void imagesRequestSucceeded(ImagesRequest imagesRequest) {
 
-  }
-
-  @Override
-  public void transactionCompleted(@NonNull Transaction transaction) {
-    if (transaction.getTransactionType() == TransactionType.SYNC) {
-      success("SYNC");
-    } else {
-      /* wait for the callback in the s */
-      Uri uri = Uri.parse(transaction.getRedirectUrl());
-      Intent intent = new Intent(Intent.ACTION_VIEW, uri);
-      activity.startActivity(intent);
-    }
-  }
-
-  @Override
-  public void transactionFailed(@NonNull Transaction transaction, @NonNull PaymentError paymentError) {
-    error("transactionFailed", paymentError.getErrorMessage(), "transactionFailed"
-    );
-  }
-
-  @Override
-  public void brandsValidationRequestSucceeded(@NonNull BrandsValidation brandsValidation) {
-    ITransactionListener.super.brandsValidationRequestSucceeded(brandsValidation);
-  }
-
-  @Override
-  public void brandsValidationRequestFailed(@NonNull PaymentError error) {
-    ITransactionListener.super.brandsValidationRequestFailed(error);
-  }
-
-  @Override
-  public void paymentConfigRequestSucceeded(@NonNull CheckoutInfo checkoutInfo) {
-    ITransactionListener.super.paymentConfigRequestSucceeded(checkoutInfo);
-  }
-
-  @Override
-  public void paymentConfigRequestFailed(@NonNull PaymentError error) {
-    ITransactionListener.super.paymentConfigRequestFailed(error);
-  }
-
-  @Override
-  public void imagesRequestSucceeded(@NonNull ImagesRequest imagesRequest) {
-    ITransactionListener.super.imagesRequestSucceeded(imagesRequest);
   }
 
   @Override
   public void imagesRequestFailed() {
-    ITransactionListener.super.imagesRequestFailed();
+
   }
 
   @Override
-  public void binRequestSucceeded(@NonNull String[] brands) {
-    ITransactionListener.super.binRequestSucceeded(brands);
+  public void paymentConfigRequestSucceeded(CheckoutInfo checkoutInfo) {
+
   }
 
   @Override
-  public void binRequestFailed() {
-    ITransactionListener.super.binRequestFailed();
+  public void paymentConfigRequestFailed(PaymentError paymentError) {
+
+  }
+
+  @Override
+  public void transactionCompleted(Transaction transaction) {
+
+
+    if (transaction == null) {
+
+      return;
+    }
+
+    if (transaction.getTransactionType() == TransactionType.SYNC) {
+
+      success("SYNC");
+
+
+
+    } else {
+      /* wait for the callback in the s */
+
+      Uri uri = Uri.parse(transaction.getRedirectUrl());
+
+      Intent intent2 = new Intent(Intent.ACTION_VIEW,uri);
+      startActivity(intent2);
+    }
+
+  }
+
+  @Override
+  public void transactionFailed(Transaction transaction, PaymentError paymentError) {
+
+  }
+
+  @Override
+  protected void onNewIntent(Intent intent) {
+    super.onNewIntent(intent);
+
+
+    if (intent.getScheme().equals("com.mosab.demohyperpayapp")) {
+
+      success("success");
+
+    }
   }
 }
