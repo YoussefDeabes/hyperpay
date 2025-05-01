@@ -37,8 +37,6 @@
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustPan"
             tools:replace="android:windowSoftInputMode" />
-
-             
         
         <meta-data
             android:name="flutterEmbedding"
@@ -47,7 +45,5 @@
         <receiver
             android:name=".CheckoutBroadcastReceiver"
             android:exported="false" />
-
-
     </application>
 </manifest>
