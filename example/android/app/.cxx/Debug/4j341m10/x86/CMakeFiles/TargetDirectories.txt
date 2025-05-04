@@ -1,0 +1,2 @@
+/Users/youssefdeabes/YDeabes/Freelance/hyperpay/example/android/app/.cxx/Debug/4j341m10/x86/CMakeFiles/edit_cache.dir
+/Users/youssefdeabes/YDeabes/Freelance/hyperpay/example/android/app/.cxx/Debug/4j341m10/x86/CMakeFiles/rebuild_cache.dir
